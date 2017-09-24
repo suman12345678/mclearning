@@ -1,0 +1,110 @@
+The goal of your project is to predict the manner in which they did the exercise. 
+This is the "classe" variable in the training set. You may use any of the other 
+variables to predict with. You should create a report describing how you built your 
+model, how you used cross validation, what you think the expected out of sample error 
+is, and why you made the choices you did. You will also use your prediction model to 
+predict 20 different test cases.
+Data
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+loading data
+```{r}
+setwd("C:\\Users\\suman\\Desktop\\datasciencecoursera\\mclearning")
+training<-read.table("pml-training.csv",sep=',',header=TRUE)
+testing<-read.table("pml-testing.csv",sep=',',header=TRUE)
+```
+cleanning data remode na where na is more than 19621 and remove first 6 columns
+```{r}
+training_clean<-training[,7:160]
+training_clean<-training_clean[lapply(training_clean,function(x) sum(is.na(x))/length(x))<.1]
+
+
+#is_data<-apply(!is.na(training_clean),2,sum)>19621
+#training_clean<-training[,is_data]
+#ncol(training_clean)
+```
+split training data in 2 part
+```{r}
+library(caret)
+set.seed(3141592)
+intrain<-createDataPartition(y=training_clean$classe,p=.6,list=FALSE)
+train1<-training_clean[intrain,]
+train2<-training_clean[-intrain,]
+dim(train1)
+dim(train2)
+```
+remove almost 0 variance records
+```{r}
+nzv_cols <- nearZeroVar(train1)
+if(length(nzv_cols)>0){
+  train1<-train1[,-nzv_cols]
+  train2<-train2[,-nzv_cols]
+}
+dim(train1)
+dim(train2)
+```
+apply model as the data is now clean
+```{r}
+library(randomForest)
+fitModel <- randomForest(classe~., data=train1, importance=TRUE, ntree=100)
+varImpPlot(fitModel)
+
+```
+using the accuracy and gini graph we select top 10 variable to consider. if the accuracy is acceptable limiting varible is good idea.Our 10 covariates are: yaw_belt, roll_belt, num_window, pitch_belt, magnet_dumbbell_y, magnet_dumbbell_z, pitch_forearm, accel_dumbbell_y, roll_arm, and roll_forearm.Let's analyze the correlations between these 10 variables. The following code calculates the correlation matrix. replaces the 1s in the diagonal with 0s, and outputs which variables have an absolute value correlation above 75%:
+```{r}
+correl = cor(train1[,c("yaw_belt","roll_belt","num_window","pitch_belt","magnet_dumbbell_z","magnet_dumbbell_y","pitch_forearm","accel_dumbbell_y","roll_arm","roll_forearm")])
+diag(correl) <- 0
+which(abs(correl)>0.75, arr.ind=TRUE)
+cor(train1$roll_belt, train1$yaw_belt)
+
+```
+so those 2 variables are above having high corelation so we should take one of those.eliminate yaw_belt and try after running the cor() function its around .5. so variables are satisfiedly taken
+
+relation between below 2 variables can be seen by
+#qplot(roll_belt, magnet_dumbbell_y, colour=classe, data=train1)
+
+try decision tree
+```{r}
+library(rpart.plot)
+fitModel <- rpart(classe~., data=train1, method="class")
+prp(fitModel)
+
+```
+but random forest wil produce better result so we will use those 9 variable where corelations is not more than .5 so can be said indepedendent.and we are using 2 fold cross validation
+```{r}
+fitModel <- randomForest(classe~roll_belt+num_window+pitch_belt+magnet_dumbbell_y+magnet_dumbbell_z+pitch_forearm+accel_dumbbell_y+roll_arm+roll_forearm,
+                  data=train1,
+                  method="rf",
+                  trControl=trainControl(method="cv",number=2),
+                  prox=TRUE,
+                  verbose=TRUE,
+                  allowParallel=TRUE)
+```
+save the model and use later
+```{r}
+saveRDS(fitModel, "modelRF.Rds")
+fitModel <- readRDS("modelRF.Rds")
+```
+
+find accuracy
+```{r}
+library(e1071)
+predictions <- predict(fitModel, newdata=train2)
+confusionMat <- confusionMatrix(predictions, train2$classe)
+confusionMat
+```
+so out of sample error 1-accuracy=1-99.22=.23%
+now we can predict from the testing data and store those as classe variable and save in a csv file
+```{r}
+predictions <- predict(fitModel, newdata=testing)
+testing$classe <- predictions
+submit <- data.frame(problem_id = testing$problem_id, classe = predictions)
+write.csv(submit, file = "coursera-submission.csv", row.names = FALSE)
+```
+
+
+
+
